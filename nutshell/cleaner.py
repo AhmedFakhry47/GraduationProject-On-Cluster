@@ -47,7 +47,7 @@ def cleaner(file_dir,where_to_sve):
 		plt.plot(n_epochs,All_in[i],colors[i],label=labels[i])
 		plt.legend(loc='upper left')
 	
-	plt.savefig(where_to_sve)
+	plt.savefig(where_to_sve,quality=90,format='png',dpi=100)
 	
 if __name__ == "__main__":
 	if(len(sys.argv) > 3): 
