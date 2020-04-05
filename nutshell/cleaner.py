@@ -17,7 +17,7 @@ def read_file(file_dir):
 			else:yield None,None
 
 
-def cleaner(file_dir):
+def cleaner(file_dir,where_to_sve):
 	file_opened = read_file(file_dir)
 
 	losses = []
@@ -46,12 +46,13 @@ def cleaner(file_dir):
 		plt.subplot(2,2,i+1)
 		plt.plot(n_epochs,All_in[i],colors[i],label=labels[i])
 		plt.legend(loc='upper left')
-	plt.show()
+	
+	plt.savefig(where_to_sve)
 	
 if __name__ == "__main__":
-	if(len(sys.argv) > 2): 
+	if(len(sys.argv) > 3): 
 		assert 'Please only add path to the output file'
 	file_dir = sys.argv[1]
-	cleaner(file_dir)
+	where_to_sve = sys.argv[2]
+	cleaner(file_dir,where_to_sve)
 	
-
