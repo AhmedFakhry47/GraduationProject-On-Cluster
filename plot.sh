@@ -9,4 +9,4 @@
 #SBATCH --output=plot.out
 
 
-python -u nutshell/cleaner.py occamsout.txt figure.png
+python -u nutshell/cleaner.py nooccams.out figure3.png

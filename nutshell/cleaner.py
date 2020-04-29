@@ -5,10 +5,11 @@ def read_file(file_dir):
 	with open(file_dir,'r') as file:
 		lines = file.readlines()
 		for line in lines:
-			if (line.lower().find('loss') !=-1):
+			if (line.lower().find('loss') !=-1):	
 				loss = float(line.split(':')[-1].split('\n')[0])
-				lr   = float(line.split(':')[2].split('l')[0])
+				lr   = 1e-3
 				yield loss,lr
+
 
 			elif(line.lower().find('mean') !=-1):
 				mAP  = float(line.split('=')[1])

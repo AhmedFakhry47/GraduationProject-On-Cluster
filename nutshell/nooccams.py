@@ -28,19 +28,16 @@ is_training = tf.placeholder(tf.bool)
 N_classes=20
 x = tf.placeholder(tf.float32, shape=(None, 416, 416, 3), name='input_x')
 yolo=nets.YOLOv2(x, nets.MobileNet50v2, is_training=True, classes=N_classes)
-# Define an optimizer
-step = tf.Variable(0, trainable=False)
-lr = tf.train.piecewise_constant(
-    step, [1032,14000,27000,40000,54000,60000,65000,70000,80000],
-    [1e-3 , 1e-4,1e-5,1e-4,1e-3,1e-4,1e-5,1e-6, 1e-7, 1e-8])
 
-
-#Optimizer
-train    = tf.train.AdamOptimizer(learning_rate=lr,beta1=0.9,beta2=0.999,epsilon=1e-8).minimize(yolo.loss,global_step=step)
+#Optimizer and dev-set decay scheduling 
+epoch = tf.Variable(0,trainable=False,name="Epoch")
+lr    = tf.Variable(0.001,trainable=False)
+lr_sch= tf.math.scalar_mul(0.95,lr)   
+train = tf.train.MomentumOptimizer(learning_rate=lr,momentum=0.85,use_locking=False, name='Momentum', use_nesterov=False).minimize(yolo.loss)
 
 
 #Check points
-checkpoint_path   = "/home/alex054u4/data/nutshell/training_trial5"
+checkpoint_path   = "/home/alex054u4/data/nutshell/training_trial-Voc-DevSetScheduling"
 checkpoint_prefix = os.path.join(checkpoint_path,"ckpt")
 if not os.path.exists(checkpoint_path):
   os.mkdir(checkpoint_path)
@@ -71,8 +68,10 @@ with tf.Session() as sess:
     sess.run(init_op)
     sess.run(yolo.stem.pretrained())
 
-  losses = []
-  for i in range(step.eval(),233):
+  best_acc     = 0.0
+  losses       = np.zeros(344)
+
+  for i in range(epoch.eval(),100):
     print(" \n Epoch", i, "starting...")
     # Iterate on VOC07+12 trainval once
 
@@ -86,13 +85,26 @@ with tf.Session() as sess:
       metas.insert(0, yolo.preprocess(imgs))  # for `inputs`
       metas.append(True)                      # for `is_training`
       outs= sess.run([train, yolo.loss],dict(zip(yolo.inputs, metas)))
-      losses.append(outs[-1])
+      losses[i] = outs[-1]
       pbar.update(1)
 
     pbar.close()
-    print_out='epoch:'+str(i)+'lr: '+ 'loss:'+str(losses[-1])
-    print(print_out)
-    print(evaluate_accuracy('tr'))
-    print(evaluate_accuracy('te'))
 
-    train_saver.save(sess,checkpoint_prefix)
+    tracc_str,_     = evaluate_accuracy('tr')
+    teacc_str,teacc = evaluate_accuracy('te')
+    print_out='epoch:'+str(i)+'lr: '+str(lr.eval())+ 'loss:'+str(np.mean(losses))
+    
+    print(print_out)
+    print(tracc_str)
+    print(teacc_str)
+
+    if(i%5==0):
+      #Dev-Set LR scheduling 
+      if (teacc > best_acc):
+        best_acc = teacc
+        #Save the current values of the model
+        sess.run(epoch.assign(i))
+        train_saver.save(sess,checkpoint_prefix)
+      else:
+        sess.run(lr.assign(lr_sch))
+
