@@ -6,16 +6,25 @@ from tensorflow.keras.utils import plot_model
 from yolfnets.references.yolo_utils import get_v2_boxes, v2_loss, v2_inputs
 from yolfnets.preprocess import darknet_preprocess as preprocess
 
-def darkdepthsepconv(inputs, filters, kernel, name, lmbda=5e-4, dropout_rate=0):
-  with tf.name_scope(name):
-    x = tf.keras.layers.DepthwiseConv2D(kernel, depth_multiplier=1, padding='same', use_bias=False, name=name+'/sconv', kernel_regularizer=tf.keras.regularizers.l2(lmbda),kernel_initializer=tf.keras.initializers.VarianceScaling(scale=1.53846))(inputs)
-    x = tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=1e-5, center=True, scale=True, name=name+'/bnd')(x)
-    x = tf.keras.layers.LeakyReLU(alpha=0.1)(x)
 
-    x = tf.keras.layers.Conv2D(filters, 1, padding='same', use_bias=False, name=name+'/conv', kernel_regularizer=tf.keras.regularizers.l2(lmbda),kernel_initializer=tf.keras.initializers.VarianceScaling(scale=1.53846))(x)
-    x = tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=1e-5, center=True, scale=True, name=name+'/bns')(x)
-    x = tf.nn.bias_add(x, tf.Variable(tf.random_normal([filters])), name= name+'bias_add')
-    x = tf.keras.layers.LeakyReLU(alpha=0.1)(x)
+def conv(inputs, filters, kernel, strides=1, scope=''):
+  x = tf.keras.layers.Conv2D(filters,kernel,strides=strides,activation= tf.keras.activations.relu,padding='same',use_bias=True,name=scope+'/Conv2D',kernel_initializer=tf.keras.initializers.he_normal(seed=1))(inputs)
+  x = tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=1e-5, center=True, scale=True, name=scope+'/bnconv2D')(x)
+  x = tf.keras.layers.ReLU(max_value=6)(x)
+  return x
+
+def sconv(inputs, filters,kernel,strides=1, depth_multiplier=1, scope=''):
+  if(filters==None):
+    return tf.keras.layers.DepthwiseConv2D(kernel,strides=strides,depth_multiplier=depth_multiplier,padding='same', use_bias=False,name=scope+'/dwconv',kernel_initializer=tf.keras.initializers.he_normal(seed=1))(inputs)
+  else:
+    return tf.keras.layers.SeparableConv2D(filters,kernel,strides=strides,depth_multiplier=depth_multiplier,padding='same',activation= tf.keras.activations.relu,use_bias=True,name=scope+'/sconv',kernel_initializer=tf.keras.initializers.he_normal(seed=1))(inputs)
+
+def block(inputs, filters, kernel, scope):
+  with tf.name_scope(scope): 
+    x = sconv(inputs,None,kernel,strides=1,depth_multiplier=1,scope=scope)
+    x = tf.keras.layers.BatchNormalization(momentum=0.99, epsilon=1e-5, center=True, scale=True, name=scope+'/bndwconv2D')(x)
+    x = tf.keras.layers.ReLU(max_value=6)(x)
+    x = conv(x,filters,1,strides=1,scope=scope)
     return x
     
 def meta(dataset_name='voc'):
@@ -30,31 +39,38 @@ def meta(dataset_name='voc'):
   
   return bases
 
+def tinyYolf(x, is_training, classes, scope='TinyYolf', reuse=None):
+  with tf.name_scope(scope):
+    x = conv(x, 16, 3, scope='conv1') 
+    x = tf.keras.layers.MaxPool2D(2,strides=2)(x)
+    x = block(x, 32, 3, scope='conv2') 
+    x = tf.keras.layers.MaxPool2D(2,strides=2)(x)
+    x = block(x, 64, 3, scope='conv3') 
+    x = tf.keras.layers.MaxPool2D(2,strides=2)(x)
+    x = block(x, 128, 3, scope='conv4') 
+    x = tf.keras.layers.MaxPool2D(2,strides=2)(x)
+    x = block(x, 256, 3, scope='conv5') 
+    x = tf.keras.layers.MaxPool2D(2,strides=2)(x)
+    x = block(x, 512, 3, scope='conv6') 
+
+
+    x = block(x, 1024, 3, scope='conv7') 
+    x = block(x, 1024, 3, scope='conv8')
+    x = tf.keras.layers.Conv2D((classes+ 5) * 5, 1, kernel_regularizer=tf.keras.regularizers.l2(5e-4), padding='same', name='genYOLOv2/linear/conv')(x)
+    x.aliases = []
+    return x
+
+
 def model(inputs, is_training=True, lmbda=5e-4, dropout_rate=0): 
   metas=meta()
   N_classes=metas['classes']
-  lmbda += 1e-10
 
-  with tf.name_scope('stem'):
-    x = stem = nets.MobileNet25(inputs, is_training=True, stem=True,  scope='stem', lmbda=lmbda, dropout_rate=dropout_rate) #bulding the model
-
-  p = x.p
-
-  x = darkdepthsepconv(x, 2048, 3, name='genYOLOv2/conv7', lmbda=lmbda, dropout_rate=dropout_rate)
-  x = darkdepthsepconv(x, 2048, 3, name='genYOLOv2/conv8', lmbda=lmbda, dropout_rate=dropout_rate)
-
-  p = darkdepthsepconv(p, 128, 1, name='genYOLOv2/conv5a', lmbda=lmbda, dropout_rate=dropout_rate)
-  p = tf.reshape(p,[-1, 13,13,512], name='flat5a')
-  x = tf.concat([p, x], axis=3, name='concat')
-
-  x = darkdepthsepconv(x, 2048, 3, name='genYOLOv2/conv9', lmbda=lmbda, dropout_rate=dropout_rate)
-  x = tf.keras.layers.Conv2D((N_classes+ 5) * 5, 1, kernel_regularizer=tf.keras.regularizers.l2(lmbda), padding='same', name='genYOLOv2/linear/conv')(x)
-  x.aliases = []
+  print(inputs.shape)
+  x = tinyYolf(inputs, is_training=is_training, classes =N_classes , scope='TinyYolf', reuse=None)
 
   def get_boxes(*args, **kwargs):
   	return get_v2_boxes(metas, *args, **kwargs)
   x.get_boxes = get_boxes
-  x.stem = stem
   x.inputs = [inputs]
   x.inputs += v2_inputs(x.shape[1:3], metas['num'], N_classes, x.dtype)
   if isinstance(is_training, tf.Tensor):
